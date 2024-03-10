@@ -78,7 +78,8 @@ export default function App() {
 
   // create a state variable for our connection
   const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
-  
+
+
   // connection to use with local solana test validator
   // const connection = new Connection("http://127.0.0.1:8899", "confirmed");
 
@@ -97,16 +98,25 @@ export default function App() {
    */
   const createSender = async () => {
     // create a new Keypair
-
+    const senderKeypair = Keypair.generate();
 
     console.log('Sender account: ', senderKeypair!.publicKey.toString());
     console.log('Airdropping 2 SOL to Sender Wallet');
 
     // save this new KeyPair into this state variable
-    setSenderKeypair(/*KeyPair here*/);
+    setSenderKeypair(senderKeypair);
 
     // request airdrop into this new account
-    
+    try {
+      const fromAirDropSignature = await connection.requestAirdrop(
+        new PublicKey(senderKeypair.publicKey),
+        2 * LAMPORTS_PER_SOL
+      );
+      await connection.confirmTransaction(fromAirDropSignature);
+    } catch (err) {
+      console.log(err);
+    }
+
 
     const latestBlockHash = await connection.getLatestBlockhash();
 
@@ -127,9 +137,12 @@ export default function App() {
     if (solana) {
       try {
         // connect to phantom wallet and return response which includes the wallet public key
+        const response = await solana.connect();
+        console.log('wallet connect to:', response.publicKey.toString());
+        console.log('connected wallet balanace:', await connection.getBalance(response.publicKey)/LAMPORTS_PER_SOL);
 
         // save the public key of the phantom wallet to the state variable
-        setReceiverPublicKey(/*PUBLIC KEY*/);
+        setReceiverPublicKey(response.publicKey);
       } catch (err) {
         console.log(err);
       }
@@ -160,15 +173,58 @@ export default function App() {
    * @description transfer SOL from sender wallet to connected wallet.
    * This function is called when the Transfer SOL to Phantom Wallet button is clicked
    */
-  const transferSol = async () => {    
-    
+  const transferSol = async () => {
+
+    const senderwallet = new PublicKey(senderKeypair!.publicKey)
+    const connectedwallet = new PublicKey(receiverPublicKey!)
+
     // create a new transaction for the transfer
+    console.log("Airdopping some SOL to Sender wallet!");
+    try {
+      const fromAirDropSignature = await connection.requestAirdrop(
+        senderwallet,
+        1 * LAMPORTS_PER_SOL
+      );
 
-    // send and confirm the transaction
+      // Latest blockhash (unique identifer of the block) of the cluster
+      let latestBlockHash = await connection.getLatestBlockhash();
 
-    console.log("transaction sent and confirmed");
-    console.log("Sender Balance: " + await connection.getBalance(senderKeypair!.publicKey) / LAMPORTS_PER_SOL);
-    console.log("Receiver Balance: " + await connection.getBalance(receiverPublicKey!) / LAMPORTS_PER_SOL);
+      // Confirm transaction using the last valid block height (refers to its time)
+      // to check for transaction expiration
+      await connection.confirmTransaction({
+        blockhash: latestBlockHash.blockhash,
+        lastValidBlockHeight: latestBlockHash.lastValidBlockHeight,
+        signature: fromAirDropSignature
+      });
+
+      // Send money from "senderwallet" wallet and into the "connectedwallet" wallet
+      var transaction = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: senderwallet,
+          toPubkey: connectedwallet,
+          lamports: LAMPORTS_PER_SOL / 100
+        })
+      );
+
+      // Signing  transaction
+      var signature = await sendAndConfirmTransaction(
+        connection,
+        transaction,
+        [senderKeypair!]
+      );
+      console.log('Signature is', signature);
+      console.log("transaction sent and confirmed");
+
+      console.log("Sender Address:" + senderKeypair!.publicKey)
+      console.log("Sender Balance: " + await connection.getBalance(senderKeypair!.publicKey) / LAMPORTS_PER_SOL);
+      
+      console.log("Reciever Address:" + receiverPublicKey!)
+      console.log("Receiver Balance: " + await connection.getBalance(receiverPublicKey!) / LAMPORTS_PER_SOL);
+
+    }
+    catch (error) {
+      console.log(error)
+    }
   };
 
   // HTML code for the app
@@ -176,7 +232,7 @@ export default function App() {
     <div className="App">
       <header className="App-header">
         <h2>Module 2 Assessment</h2>
-        <span className ="buttons">
+        <span className="buttons">
           <button
             style={{
               fontSize: "16px",
@@ -220,17 +276,17 @@ export default function App() {
             </div>
           )}
           {provider && receiverPublicKey && senderKeypair && (
-          <button
-            style={{
-              fontSize: "16px",
-              padding: "15px",
-              fontWeight: "bold",
-              borderRadius: "5px",
-            }}
-            onClick={transferSol}
-          >
-            Transfer SOL to Phantom Wallet
-          </button>
+            <button
+              style={{
+                fontSize: "16px",
+                padding: "15px",
+                fontWeight: "bold",
+                borderRadius: "5px",
+              }}
+              onClick={transferSol}
+            >
+              Transfer SOL to Phantom Wallet
+            </button>
           )}
         </span>
         {!provider && (
